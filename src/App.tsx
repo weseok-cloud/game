@@ -986,18 +986,26 @@ export default function App() {
                 <motion.h1 
                   initial={{ y: -20 }}
                   animate={{ y: 0 }}
-                  className="text-6xl font-black mb-2 tracking-tighter italic text-blue-500"
+                  className="text-6xl sm:text-7xl font-black mb-1 tracking-tighter italic text-blue-400 drop-shadow-[0_0_10px_rgba(96,165,250,0.8)]"
                 >
-                  GALACTIC
+                  SPACE
                 </motion.h1>
                 <motion.h2 
                   initial={{ y: -20 }}
                   animate={{ y: 0 }}
                   transition={{ delay: 0.1 }}
-                  className="text-4xl font-black mb-8 tracking-tighter italic text-red-500"
+                  className="text-6xl sm:text-7xl font-black mb-2 tracking-tighter italic text-orange-500 drop-shadow-[0_0_10px_rgba(249,115,22,0.8)]"
                 >
-                  DEFENDER
+                  SHIP
                 </motion.h2>
+                <motion.h3 
+                  initial={{ y: -20 }}
+                  animate={{ y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-2xl sm:text-3xl font-black mb-8 tracking-widest italic text-cyan-300 drop-shadow-[0_0_8px_rgba(103,232,249,0.8)]"
+                >
+                  ARCADE SHOOTER
+                </motion.h3>
                 <p className="text-neutral-400 mb-8 max-w-xs">
                   Move with <span className="text-white font-bold">Arrow Keys</span> or <span className="text-white font-bold">WASD</span>. 
                   Shoot with <span className="text-white font-bold">SPACE</span>.
