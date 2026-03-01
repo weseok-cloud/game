@@ -1,0 +1,5 @@
+{
+  "name": "갤러그스타일",
+  "description": "A classic Galaga-style arcade shooter with vertical scrolling, random enemy movement, and projectile combat.",
+  "requestFramePermissions": []
+}
