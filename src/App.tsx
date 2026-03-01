@@ -8,8 +8,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Heart, Play, RotateCcw, Trophy, Maximize, Minimize, Zap } from 'lucide-react';
 
 // --- Constants ---
-const CANVAS_WIDTH = 600;
-const CANVAS_HEIGHT = 800;
+const CANVAS_WIDTH = 540;
+const CANVAS_HEIGHT = 960;
 const PLAYER_WIDTH = 40;
 const PLAYER_HEIGHT = 40;
 const ENEMY_RADIUS = 15;
@@ -171,6 +171,21 @@ interface Entity {
   y: number;
 }
 
+interface Player extends Entity {
+  weaponType: 'DEFAULT' | 'RAPID' | 'SPREAD';
+  weaponTimer: number;
+  shield: boolean;
+}
+
+type PowerUpType = 'RAPID' | 'SPREAD' | 'SHIELD' | 'LIFE';
+
+interface PowerUp extends Entity {
+  type: PowerUpType;
+  vy: number;
+  width: number;
+  height: number;
+}
+
 interface Enemy extends Entity {
   type: EnemyType;
   vx: number;
@@ -217,6 +232,7 @@ export default function App() {
   const [lives, setLives] = useState(3);
   const [stage, setStage] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [currentPage, setCurrentPage] = useState<'home' | 'privacy' | 'terms' | 'contact'>('home');
   const [highScore, setHighScore] = useState(() => {
     const saved = localStorage.getItem('galactic_defender_highscore');
     return saved ? parseInt(saved, 10) : 0;
@@ -228,7 +244,14 @@ export default function App() {
   const stageRef = useRef(1);
   const killsInStageRef = useRef(0);
   
-  const playerRef = useRef<Entity>({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 60 });
+  const playerRef = useRef<Player>({ 
+    x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, 
+    y: CANVAS_HEIGHT - 60,
+    weaponType: 'DEFAULT',
+    weaponTimer: 0,
+    shield: false
+  });
+  const powerUpsRef = useRef<PowerUp[]>([]);
   const enemiesRef = useRef<Enemy[]>([]);
   const playerBulletsRef = useRef<Bullet[]>([]);
   const enemyBulletsRef = useRef<Bullet[]>([]);
@@ -331,9 +354,16 @@ export default function App() {
     syncState();
     
     setGameState('PLAYING');
-    playerRef.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 60 };
+    playerRef.current = { 
+      x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, 
+      y: CANVAS_HEIGHT - 60,
+      weaponType: 'DEFAULT',
+      weaponTimer: 0,
+      shield: false
+    };
     playerBulletsRef.current = [];
     enemyBulletsRef.current = [];
+    powerUpsRef.current = [];
     initEnemies();
   };
 
@@ -343,6 +373,7 @@ export default function App() {
     setGameState('PLAYING');
     playerBulletsRef.current = [];
     enemyBulletsRef.current = [];
+    powerUpsRef.current = [];
     initEnemies();
   };
 
@@ -375,7 +406,10 @@ export default function App() {
 
   // Input Handlers
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { keysRef.current[e.key] = true; };
+    const handleKeyDown = (e: KeyboardEvent) => { 
+      keysRef.current[e.key] = true; 
+      if (e.key === ' ') e.preventDefault();
+    };
     const handleKeyUp = (e: KeyboardEvent) => { keysRef.current[e.key] = false; };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -413,12 +447,24 @@ export default function App() {
     // 2. Player Shooting
     if (keysRef.current[' '] || keysRef.current['Control']) {
       const now = Date.now();
-      if (now - lastShotRef.current > SHOOT_COOLDOWN) {
-        playerBulletsRef.current.push({
-          x: playerRef.current.x + PLAYER_WIDTH / 2 - PLAYER_BULLET_WIDTH / 2,
-          y: playerRef.current.y,
-          active: true
-        });
+      const cooldown = playerRef.current.weaponType === 'RAPID' ? SHOOT_COOLDOWN / 2 : SHOOT_COOLDOWN;
+      
+      if (now - lastShotRef.current > cooldown) {
+        if (playerRef.current.weaponType === 'SPREAD') {
+          playerBulletsRef.current.push(
+            { x: playerRef.current.x + PLAYER_WIDTH / 2 - PLAYER_BULLET_WIDTH / 2, y: playerRef.current.y, active: true, vx: 0, vy: -PLAYER_BULLET_SPEED },
+            { x: playerRef.current.x + PLAYER_WIDTH / 2 - PLAYER_BULLET_WIDTH / 2, y: playerRef.current.y, active: true, vx: -2, vy: -PLAYER_BULLET_SPEED },
+            { x: playerRef.current.x + PLAYER_WIDTH / 2 - PLAYER_BULLET_WIDTH / 2, y: playerRef.current.y, active: true, vx: 2, vy: -PLAYER_BULLET_SPEED }
+          );
+        } else {
+          playerBulletsRef.current.push({
+            x: playerRef.current.x + PLAYER_WIDTH / 2 - PLAYER_BULLET_WIDTH / 2,
+            y: playerRef.current.y,
+            active: true,
+            vx: 0,
+            vy: -PLAYER_BULLET_SPEED
+          });
+        }
         lastShotRef.current = now;
         sound.playShoot();
       }
@@ -426,8 +472,9 @@ export default function App() {
 
     // 3. Update Player Bullets
     playerBulletsRef.current.forEach(bullet => {
-      bullet.y -= PLAYER_BULLET_SPEED;
-      if (bullet.y < -20) bullet.active = false;
+      bullet.x += bullet.vx || 0;
+      bullet.y += bullet.vy || -PLAYER_BULLET_SPEED;
+      if (bullet.y < -20 || bullet.x < -20 || bullet.x > CANVAS_WIDTH + 20) bullet.active = false;
     });
     playerBulletsRef.current = playerBulletsRef.current.filter(b => b.active);
 
@@ -571,6 +618,20 @@ export default function App() {
           if (enemy.hp <= 0) {
             enemy.active = false;
             
+            // Drop power-up (15% chance, or 100% for boss)
+            if (Math.random() < 0.15 || enemy.type === 'BOSS') {
+              const types: PowerUpType[] = ['RAPID', 'SPREAD', 'SHIELD', 'LIFE'];
+              const type = types[Math.floor(Math.random() * types.length)];
+              powerUpsRef.current.push({
+                x: enemy.x,
+                y: enemy.y,
+                type,
+                vy: 2,
+                width: 20,
+                height: 20
+              });
+            }
+            
             let points = 10;
             if (enemy.type === 'WAVE') points = 20;
             if (enemy.type === 'DIVER') points = 30;
@@ -619,12 +680,17 @@ export default function App() {
         bullet.y < playerRef.current.y + PLAYER_HEIGHT
       ) {
         bullet.active = false;
-        sound.playHit();
-        livesRef.current -= 1;
-        if (livesRef.current <= 0) {
-          gameOver();
+        if (playerRef.current.shield) {
+          playerRef.current.shield = false;
+          sound.playHit(); // Or a specific shield break sound
+        } else {
+          sound.playHit();
+          livesRef.current -= 1;
+          if (livesRef.current <= 0) {
+            gameOver();
+          }
+          syncState();
         }
-        syncState();
       }
     });
 
@@ -638,19 +704,89 @@ export default function App() {
         enemy.y + hitRadius > playerRef.current.y &&
         enemy.y - hitRadius < playerRef.current.y + PLAYER_HEIGHT
       ) {
-        sound.playHit();
-        livesRef.current -= 1;
-        if (livesRef.current <= 0) {
-          gameOver();
+        if (playerRef.current.shield) {
+          playerRef.current.shield = false;
+          sound.playHit();
+        } else {
+          sound.playHit();
+          livesRef.current -= 1;
+          if (livesRef.current <= 0) {
+            gameOver();
+          }
+          syncState();
         }
-        syncState();
         if (enemy.type !== 'BOSS') {
           enemy.active = false;
         }
       }
     });
 
-    // 9. Filter out dead enemies and check for stage clear
+    // 9. Power-ups Update and Collision
+    powerUpsRef.current.forEach(pu => {
+      pu.y += pu.vy;
+      
+      // Collision with player
+      if (
+        pu.x < playerRef.current.x + PLAYER_WIDTH &&
+        pu.x + pu.width > playerRef.current.x &&
+        pu.y < playerRef.current.y + PLAYER_HEIGHT &&
+        pu.y + pu.height > playerRef.current.y
+      ) {
+        pu.y = CANVAS_HEIGHT + 100; // Move off-screen to be filtered out
+        sound.playBonus();
+        
+        let text = '';
+        let color = '#fff';
+        
+        switch (pu.type) {
+          case 'RAPID':
+            playerRef.current.weaponType = 'RAPID';
+            playerRef.current.weaponTimer = 300; // 5 seconds at 60fps
+            text = 'RAPID FIRE!';
+            color = '#f59e0b';
+            break;
+          case 'SPREAD':
+            playerRef.current.weaponType = 'SPREAD';
+            playerRef.current.weaponTimer = 300;
+            text = 'SPREAD SHOT!';
+            color = '#ef4444';
+            break;
+          case 'SHIELD':
+            playerRef.current.shield = true;
+            text = 'SHIELD ACTIVE!';
+            color = '#3b82f6';
+            break;
+          case 'LIFE':
+            livesRef.current += 1;
+            syncState();
+            text = '1UP!';
+            color = '#10b981';
+            break;
+        }
+        
+        floatingTextsRef.current.push({
+          x: playerRef.current.x + PLAYER_WIDTH / 2,
+          y: playerRef.current.y - 20,
+          text,
+          life: 60,
+          maxLife: 60,
+          color
+        });
+      }
+    });
+    
+    // Filter out off-screen power-ups
+    powerUpsRef.current = powerUpsRef.current.filter(pu => pu.y < CANVAS_HEIGHT);
+
+    // Update player weapon timer
+    if (playerRef.current.weaponTimer > 0) {
+      playerRef.current.weaponTimer -= 1;
+      if (playerRef.current.weaponTimer <= 0) {
+        playerRef.current.weaponType = 'DEFAULT';
+      }
+    }
+
+    // 10. Filter out dead enemies and check for stage clear
     enemiesRef.current = enemiesRef.current.filter(e => e.active);
     
     if (enemiesRef.current.length === 0 && gameState === 'PLAYING') {
@@ -705,6 +841,19 @@ export default function App() {
       ctx.beginPath();
       ctx.ellipse(0, -5, 3, 6, 0, 0, Math.PI * 2);
       ctx.fill();
+      
+      // Shield
+      if (playerRef.current.shield) {
+        ctx.strokeStyle = '#3b82f6'; // Blue shield
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 25, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+        ctx.fill();
+      }
+      
       ctx.restore();
 
       // Draw Enemies
@@ -886,6 +1035,65 @@ export default function App() {
         ctx.fill();
       });
       
+      // Draw Power-ups
+      powerUpsRef.current.forEach(pu => {
+        ctx.save();
+        ctx.translate(pu.x + pu.width / 2, pu.y + pu.height / 2);
+        
+        // Pulsing effect
+        const scale = 1 + Math.sin(Date.now() / 150) * 0.1;
+        ctx.scale(scale, scale);
+        
+        ctx.beginPath();
+        ctx.arc(0, 0, pu.width / 2, 0, Math.PI * 2);
+        
+        switch (pu.type) {
+          case 'RAPID':
+            ctx.fillStyle = '#f59e0b'; // Amber
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('R', 0, 0);
+            break;
+          case 'SPREAD':
+            ctx.fillStyle = '#ef4444'; // Red
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('S', 0, 0);
+            break;
+          case 'SHIELD':
+            ctx.fillStyle = '#3b82f6'; // Blue
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('O', 0, 0);
+            break;
+          case 'LIFE':
+            ctx.fillStyle = '#10b981'; // Emerald
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('+', 0, 0);
+            break;
+        }
+        
+        // Glow
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+        
+        ctx.restore();
+      });
+      
       // Draw Boss HP Bar
       const boss = enemiesRef.current.find(e => e.type === 'BOSS');
       if (boss) {
@@ -926,163 +1134,275 @@ export default function App() {
   }, [gameState]);
 
   return (
-    <div ref={containerRef} className="h-screen w-screen bg-neutral-950 flex flex-col items-center justify-center font-sans text-white overflow-hidden">
-      {/* Game Canvas Container */}
-      <div className="relative w-full h-full max-w-5xl flex flex-col items-center justify-center">
-        <div className="relative w-full h-full bg-black overflow-hidden shadow-2xl sm:border-x-4 border-neutral-800">
-          
-          {/* Overlay Header */}
-          <div className="absolute top-0 left-0 w-full flex justify-between items-start p-4 sm:p-6 z-10 pointer-events-none">
-            <div className="flex flex-col gap-2 pointer-events-auto">
-              <div className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-500 drop-shadow-md" />
-                <span className="font-mono text-xl sm:text-2xl font-bold drop-shadow-md">{score.toString().padStart(6, '0')}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] sm:text-xs text-neutral-300 font-bold leading-none drop-shadow-md">HIGH SCORE</span>
-                <span className="font-mono text-sm sm:text-base font-bold text-yellow-500 leading-none drop-shadow-md">{highScore.toString().padStart(6, '0')}</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-blue-900/50 px-3 py-1 rounded-full border border-blue-500/30 w-fit backdrop-blur-sm mt-1">
-                <Zap className="w-4 h-4 text-blue-400" />
-                <span className="text-sm font-bold text-blue-400">STAGE {stage}</span>
-              </div>
-            </div>
+    <div className="h-screen w-screen bg-neutral-950 font-sans text-white flex flex-col lg:flex-row overflow-hidden">
+      {/* Left Game Area (70%) */}
+      <div className={`relative h-[60vh] lg:h-full bg-black flex-col items-center justify-center overflow-hidden shrink-0 border-b lg:border-b-0 lg:border-r border-neutral-800 ${currentPage === 'home' ? 'flex w-full lg:w-[70%]' : 'hidden lg:flex lg:w-[70%]'}`}>
+        <div ref={containerRef} className="relative w-full h-full flex flex-col items-center justify-center">
+          <div className="relative w-full h-full bg-black overflow-hidden shadow-2xl">
             
-            <div className="flex flex-col items-end gap-3 pointer-events-auto">
-              <button 
-                onClick={toggleFullscreen}
-                className="p-2 hover:bg-white/20 bg-black/20 rounded-full transition-colors backdrop-blur-sm"
-                title="Toggle Fullscreen"
-              >
-                {isFullscreen ? <Minimize className="w-5 h-5 sm:w-6 sm:h-6" /> : <Maximize className="w-5 h-5 sm:w-6 sm:h-6" />}
-              </button>
-              <div className="flex items-center gap-1.5 bg-black/20 p-2 sm:p-3 rounded-full backdrop-blur-sm">
-                {[...Array(3)].map((_, i) => (
-                  <Heart 
-                    key={i} 
-                    className={`w-5 h-5 sm:w-6 sm:h-6 transition-colors duration-300 ${i < lives ? 'text-red-500 fill-red-500' : 'text-neutral-800'}`} 
-                  />
-                ))}
+            {/* Overlay Header */}
+            <div className="absolute top-0 left-0 w-full flex justify-between items-start p-4 sm:p-6 z-10 pointer-events-none">
+              <div className="flex flex-col gap-2 pointer-events-auto">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-500 drop-shadow-md" />
+                  <span className="font-mono text-xl sm:text-2xl font-bold drop-shadow-md">{score.toString().padStart(6, '0')}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] sm:text-xs text-neutral-300 font-bold leading-none drop-shadow-md">HIGH SCORE</span>
+                  <span className="font-mono text-sm sm:text-base font-bold text-yellow-500 leading-none drop-shadow-md">{highScore.toString().padStart(6, '0')}</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-blue-900/50 px-3 py-1 rounded-full border border-blue-500/30 w-fit backdrop-blur-sm mt-1">
+                  <Zap className="w-4 h-4 text-blue-400" />
+                  <span className="text-sm font-bold text-blue-400">STAGE {stage}</span>
+                </div>
+              </div>
+              
+              <div className="flex flex-col items-end gap-3 pointer-events-auto">
+                <button 
+                  onClick={(e) => { toggleFullscreen(); e.currentTarget.blur(); }}
+                  className="p-2 hover:bg-white/20 bg-black/20 rounded-full transition-colors backdrop-blur-sm"
+                  title="Toggle Fullscreen"
+                >
+                  {isFullscreen ? <Minimize className="w-5 h-5 sm:w-6 sm:h-6" /> : <Maximize className="w-5 h-5 sm:w-6 sm:h-6" />}
+                </button>
+                <div className="flex items-center gap-1.5 bg-black/20 p-2 sm:p-3 rounded-full backdrop-blur-sm">
+                  {[...Array(3)].map((_, i) => (
+                    <Heart 
+                      key={i} 
+                      className={`w-5 h-5 sm:w-6 sm:h-6 transition-colors duration-300 ${i < lives ? 'text-red-500 fill-red-500' : 'text-neutral-800'}`} 
+                    />
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
 
-          <canvas
-            ref={canvasRef}
-            width={CANVAS_WIDTH}
-            height={CANVAS_HEIGHT}
-            className="block h-full w-full object-contain"
-          />
+            <canvas
+              ref={canvasRef}
+              width={CANVAS_WIDTH}
+              height={CANVAS_HEIGHT}
+              className="block h-full w-full object-contain"
+            />
 
-          {/* Overlay Screens */}
-          <AnimatePresence>
-            {gameState === 'START' && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-8 text-center"
-              >
-                <motion.h1 
-                  initial={{ y: -20 }}
-                  animate={{ y: 0 }}
-                  className="text-6xl sm:text-7xl font-black mb-1 tracking-tighter italic text-blue-400 drop-shadow-[0_0_10px_rgba(96,165,250,0.8)]"
+            {/* Overlay Screens */}
+            <AnimatePresence>
+              {gameState === 'START' && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-8 text-center"
                 >
-                  SPACE
-                </motion.h1>
-                <motion.h2 
-                  initial={{ y: -20 }}
-                  animate={{ y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="text-6xl sm:text-7xl font-black mb-2 tracking-tighter italic text-orange-500 drop-shadow-[0_0_10px_rgba(249,115,22,0.8)]"
-                >
-                  SHIP
-                </motion.h2>
-                <motion.h3 
-                  initial={{ y: -20 }}
-                  animate={{ y: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-2xl sm:text-3xl font-black mb-8 tracking-widest italic text-cyan-300 drop-shadow-[0_0_8px_rgba(103,232,249,0.8)]"
-                >
-                  ARCADE SHOOTER
-                </motion.h3>
-                <p className="text-neutral-400 mb-8 max-w-xs">
-                  Move with <span className="text-white font-bold">Arrow Keys</span> or <span className="text-white font-bold">WASD</span>. 
-                  Shoot with <span className="text-white font-bold">SPACE</span>.
-                </p>
-                <button
-                  onClick={startGame}
-                  className="group relative px-8 py-4 bg-blue-600 hover:bg-blue-500 rounded-full font-bold text-xl transition-all flex items-center gap-2 overflow-hidden"
-                >
-                  <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                  <Play className="w-6 h-6 fill-current" />
-                  START MISSION
-                </button>
-              </motion.div>
-            )}
-
-            {gameState === 'STAGE_CLEAR' && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-blue-950/90 flex flex-col items-center justify-center p-8 text-center"
-              >
-                <motion.div
-                  initial={{ scale: 0.8 }}
-                  animate={{ scale: 1 }}
-                  className="mb-6"
-                >
-                  <Zap className="w-20 h-20 text-blue-400 mx-auto mb-4" />
-                  <h2 className="text-5xl font-black tracking-tighter italic text-white">STAGE CLEAR!</h2>
+                  <motion.h1 
+                    initial={{ y: -20 }}
+                    animate={{ y: 0 }}
+                    className="text-4xl sm:text-5xl font-black mb-1 tracking-tighter italic text-blue-400 drop-shadow-[0_0_10px_rgba(96,165,250,0.8)]"
+                  >
+                    SPACE
+                  </motion.h1>
+                  <motion.h2 
+                    initial={{ y: -20 }}
+                    animate={{ y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="text-4xl sm:text-5xl font-black mb-2 tracking-tighter italic text-orange-500 drop-shadow-[0_0_10px_rgba(249,115,22,0.8)]"
+                  >
+                    SHIP
+                  </motion.h2>
+                  <motion.h3 
+                    initial={{ y: -20 }}
+                    animate={{ y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-lg sm:text-xl font-black mb-8 tracking-widest italic text-cyan-300 drop-shadow-[0_0_8px_rgba(103,232,249,0.8)]"
+                  >
+                    ARCADE SHOOTER
+                  </motion.h3>
+                  <p className="text-neutral-400 mb-8 text-sm max-w-[250px]">
+                    Move with <span className="text-white font-bold">Arrow Keys</span> or <span className="text-white font-bold">WASD</span>. 
+                    Shoot with <span className="text-white font-bold">SPACE</span>.
+                  </p>
+                  <button
+                    onClick={(e) => { startGame(); e.currentTarget.blur(); }}
+                    className="group relative px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-full font-bold text-lg transition-all flex items-center gap-2 overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                    <Play className="w-5 h-5 fill-current" />
+                    START MISSION
+                  </button>
                 </motion.div>
-                <p className="text-blue-200 text-xl mb-8">PREPARING FOR STAGE {stage}...</p>
-                <button
-                  onClick={startNextStage}
-                  className="px-8 py-4 bg-blue-500 text-white hover:bg-blue-400 rounded-full font-bold text-xl transition-all flex items-center gap-2"
-                >
-                  <Play className="w-6 h-6 fill-current" />
-                  NEXT STAGE
-                </button>
-              </motion.div>
-            )}
+              )}
 
-            {gameState === 'GAMEOVER' && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center p-8 text-center"
-              >
-                <h2 className="text-6xl font-black mb-4 tracking-tighter italic text-white">MISSION FAILED</h2>
-                <div className="mb-8">
-                  <p className="text-red-200 text-lg mb-1">FINAL SCORE</p>
-                  <p className="text-5xl font-mono font-black text-white">{score.toLocaleString()}</p>
-                  <p className="text-red-300 mt-2">REACHED STAGE {stage}</p>
-                </div>
-                <button
-                  onClick={startGame}
-                  className="px-8 py-4 bg-white text-red-950 hover:bg-red-100 rounded-full font-bold text-xl transition-all flex items-center gap-2"
+              {gameState === 'STAGE_CLEAR' && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 bg-blue-950/90 flex flex-col items-center justify-center p-8 text-center"
                 >
-                  <RotateCcw className="w-6 h-6" />
-                  RETRY MISSION
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <motion.div
+                    initial={{ scale: 0.8 }}
+                    animate={{ scale: 1 }}
+                    className="mb-6"
+                  >
+                    <Zap className="w-16 h-16 text-blue-400 mx-auto mb-4" />
+                    <h2 className="text-3xl sm:text-4xl font-black tracking-tighter italic text-white">STAGE CLEAR!</h2>
+                  </motion.div>
+                  <p className="text-blue-200 text-base sm:text-lg mb-8">PREPARING FOR STAGE {stage}...</p>
+                  <button
+                    onClick={(e) => { startNextStage(); e.currentTarget.blur(); }}
+                    className="px-6 py-3 bg-blue-500 text-white hover:bg-blue-400 rounded-full font-bold text-lg transition-all flex items-center gap-2"
+                  >
+                    <Play className="w-5 h-5 fill-current" />
+                    NEXT STAGE
+                  </button>
+                </motion.div>
+              )}
+
+              {gameState === 'GAMEOVER' && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center p-8 text-center"
+                >
+                  <h2 className="text-4xl sm:text-5xl font-black mb-4 tracking-tighter italic text-white">MISSION FAILED</h2>
+                  <div className="mb-8">
+                    <p className="text-red-200 text-base mb-1">FINAL SCORE</p>
+                    <p className="text-3xl sm:text-4xl font-mono font-black text-white">{score.toLocaleString()}</p>
+                    <p className="text-red-300 mt-2">REACHED STAGE {stage}</p>
+                  </div>
+                  <button
+                    onClick={(e) => { startGame(); e.currentTarget.blur(); }}
+                    className="px-6 py-3 bg-white text-red-950 hover:bg-red-100 rounded-full font-bold text-lg transition-all flex items-center gap-2"
+                  >
+                    <RotateCcw className="w-5 h-5" />
+                    RETRY MISSION
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
-      {/* Footer Info */}
-      <div className="mt-6 text-neutral-500 text-sm flex gap-8 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-blue-500 rounded-sm" />
-          <span>Player</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-red-500 rounded-full" />
-          <span>Enemy</span>
-        </div>
+      {/* Right Content Area (30%) */}
+      <div className={`w-full lg:w-[30%] flex flex-col overflow-y-auto ${currentPage === 'home' ? 'hidden lg:flex' : 'flex'}`}>
+        {/* Header */}
+        <header className="bg-neutral-900 border-b border-neutral-800 p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 z-50 shrink-0 sticky top-0">
+          <h1 
+            className="text-xl font-black italic text-blue-400 cursor-pointer hover:text-blue-300 transition-colors" 
+            onClick={() => setCurrentPage('home')}
+          >
+            SPACE SHIP
+          </h1>
+          <nav className="flex flex-wrap gap-3 sm:gap-4 text-sm font-medium text-neutral-400">
+            <button onClick={() => setCurrentPage('home')} className={`hover:text-white transition-colors ${currentPage === 'home' ? 'text-white' : ''}`}>Play</button>
+            <button onClick={() => setCurrentPage('privacy')} className={`hover:text-white transition-colors ${currentPage === 'privacy' ? 'text-white' : ''}`}>Privacy</button>
+            <button onClick={() => setCurrentPage('terms')} className={`hover:text-white transition-colors ${currentPage === 'terms' ? 'text-white' : ''}`}>Terms</button>
+            <button onClick={() => setCurrentPage('contact')} className={`hover:text-white transition-colors ${currentPage === 'contact' ? 'text-white' : ''}`}>Contact</button>
+          </nav>
+        </header>
+
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col">
+          {currentPage === 'home' && (
+            <div className="max-w-4xl mx-auto p-6 lg:p-8 text-neutral-300 space-y-12 my-8">
+              <section>
+                <h2 className="text-3xl font-bold text-white mb-4">About Space Ship Arcade Shooter</h2>
+                <p className="leading-relaxed mb-4 text-lg">
+                  Welcome to <strong>Space Ship Arcade Shooter</strong>, the ultimate retro-inspired vertical scrolling space shooter. 
+                  Defend the galaxy against endless waves of alien invaders, dodge intricate bullet patterns, and face off against 
+                  massive mechanical bosses. Experience the nostalgia of classic arcade games directly in your browser!
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-2xl font-bold text-white mb-4">How to Play</h2>
+                <div className="grid grid-cols-1 gap-6">
+                  <div className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
+                    <h3 className="text-xl font-bold text-blue-400 mb-2">Controls</h3>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li><strong>Movement:</strong> Use the <kbd className="bg-neutral-800 px-1 rounded">Arrow Keys</kbd> or <kbd className="bg-neutral-800 px-1 rounded">W, A, S, D</kbd> to navigate your starfighter.</li>
+                      <li><strong>Combat:</strong> Press the <kbd className="bg-neutral-800 px-1 rounded">SPACEBAR</kbd> to fire your primary weapons.</li>
+                      <li><strong>Fullscreen:</strong> Click the maximize icon in the top right corner of the game screen.</li>
+                    </ul>
+                  </div>
+                  <div className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
+                    <h3 className="text-xl font-bold text-red-400 mb-2">Gameplay Tips</h3>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li><strong>Boss Battles:</strong> Every 5 stages, you will encounter a massive boss. Watch out for its spread and circle attacks!</li>
+                      <li><strong>Survival:</strong> You have 3 lives. Avoid enemy ships and their red projectiles.</li>
+                      <li><strong>Scoring:</strong> Defeat enemies to increase your score. Try to beat your high score!</li>
+                    </ul>
+                  </div>
+                </div>
+              </section>
+            </div>
+          )}
+
+        {currentPage === 'privacy' && (
+          <div className="max-w-4xl mx-auto p-6 lg:p-8 text-neutral-300 space-y-6 my-8 flex-1">
+            <h1 className="text-4xl font-bold text-white mb-8">Privacy Policy</h1>
+            <p>Last updated: {new Date().toLocaleDateString()}</p>
+            <p>This Privacy Policy describes Our policies and procedures on the collection, use and disclosure of Your information when You use the Service and tells You about Your privacy rights and how the law protects You.</p>
+            
+            <h2 className="text-2xl font-bold text-white mt-8">Google AdSense & Cookies</h2>
+            <p>Third party vendors, including Google, use cookies to serve ads based on a user's prior visits to your website or other websites.</p>
+            <p>Google's use of advertising cookies enables it and its partners to serve ads to your users based on their visit to your sites and/or other sites on the Internet.</p>
+            <p>Users may opt out of personalized advertising by visiting <a href="https://myadcenter.google.com/" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Ads Settings</a>.</p>
+            
+            <h2 className="text-2xl font-bold text-white mt-8">Contact Us</h2>
+            <p>If you have any questions about this Privacy Policy, You can contact us:</p>
+            <ul className="list-disc pl-6">
+              <li>By email: <a href="mailto:weseok@gmail.com" className="text-blue-400 hover:underline">weseok@gmail.com</a></li>
+            </ul>
+          </div>
+        )}
+
+        {currentPage === 'terms' && (
+          <div className="max-w-4xl mx-auto p-6 lg:p-8 text-neutral-300 space-y-6 my-8 flex-1">
+            <h1 className="text-4xl font-bold text-white mb-8">Terms of Service</h1>
+            <p>Last updated: {new Date().toLocaleDateString()}</p>
+            <p>Please read these terms and conditions carefully before using Our Service.</p>
+            
+            <h2 className="text-2xl font-bold text-white mt-8">Acknowledgment</h2>
+            <p>These are the Terms and Conditions governing the use of this Service and the agreement that operates between You and the Company. These Terms and Conditions set out the rights and obligations of all users regarding the use of the Service.</p>
+            <p>Your access to and use of the Service is conditioned on Your acceptance of and compliance with these Terms and Conditions. These Terms and Conditions apply to all visitors, users and others who access or use the Service.</p>
+            
+            <h2 className="text-2xl font-bold text-white mt-8">Contact Us</h2>
+            <p>If you have any questions about these Terms and Conditions, You can contact us:</p>
+            <ul className="list-disc pl-6">
+              <li>By email: <a href="mailto:weseok@gmail.com" className="text-blue-400 hover:underline">weseok@gmail.com</a></li>
+            </ul>
+          </div>
+        )}
+
+        {currentPage === 'contact' && (
+          <div className="max-w-4xl mx-auto p-6 lg:p-8 text-neutral-300 space-y-6 my-8 flex-1">
+            <h1 className="text-4xl font-bold text-white mb-8">Contact Us</h1>
+            <p className="text-lg">We'd love to hear from you! Whether you have a question about the game, need support, or want to discuss business opportunities, feel free to reach out.</p>
+            
+            <div className="bg-neutral-900 p-8 rounded-xl border border-neutral-800 mt-8">
+              <h2 className="text-2xl font-bold text-white mb-6">Get in Touch</h2>
+              <div className="space-y-4">
+                <p className="flex items-center gap-3">
+                  <span className="text-neutral-500">Email:</span> 
+                  <a href="mailto:weseok@gmail.com" className="text-blue-400 hover:underline text-lg font-medium">weseok@gmail.com</a>
+                </p>
+                <p className="text-neutral-400">We aim to respond to all inquiries within 24-48 hours.</p>
+              </div>
+            </div>
+          </div>
+        )}
+        </main>
+
+        {/* Footer */}
+        <footer className="bg-neutral-900 border-t border-neutral-800 p-8 text-center text-neutral-500 text-sm shrink-0">
+          <p className="mb-4">&copy; {new Date().getFullYear()} Space Ship Arcade Shooter. All rights reserved.</p>
+          <div className="flex flex-wrap justify-center gap-4 sm:gap-6">
+            <button onClick={() => setCurrentPage('privacy')} className="hover:text-white transition-colors">Privacy Policy</button>
+            <button onClick={() => setCurrentPage('terms')} className="hover:text-white transition-colors">Terms of Service</button>
+            <button onClick={() => setCurrentPage('contact')} className="hover:text-white transition-colors">Contact Us</button>
+          </div>
+        </footer>
       </div>
     </div>
   );
