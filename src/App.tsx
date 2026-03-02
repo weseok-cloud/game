@@ -133,29 +133,102 @@ class SoundEngine {
     if (!this.ctx || this.isPlayingBgm) return;
     this.isPlayingBgm = true;
     
-    const notes = [220, 293.66, 329.63, 440, 329.63, 293.66];
-    let noteIdx = 0;
+    // Fast-paced arcade bassline (16th notes)
+    const bassNotes = [
+      110, 110, 220, 110, 130.81, 130.81, 261.63, 130.81,
+      146.83, 146.83, 293.66, 146.83, 164.81, 164.81, 329.63, 164.81
+    ];
     
-    const playNextNote = () => {
+    // Melody (8th notes)
+    const melodyNotes = [
+      440, 0, 523.25, 0, 659.25, 0, 523.25, 0,
+      587.33, 0, 698.46, 0, 880, 0, 698.46, 0
+    ];
+    
+    let step = 0;
+    const tempo = 130; // BPM
+    const stepDuration = 60 / tempo / 4; // 16th note duration in seconds
+    
+    const playStep = () => {
       if (!this.isPlayingBgm || !this.ctx) return;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(notes[noteIdx], this.ctx.currentTime);
       
-      gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
+      const now = this.ctx.currentTime;
       
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      osc.stop(this.ctx.currentTime + 0.2);
+      // Play Bass
+      const bassFreq = bassNotes[step % bassNotes.length];
+      const bassOsc = this.ctx.createOscillator();
+      const bassGain = this.ctx.createGain();
+      bassOsc.type = 'sawtooth';
+      bassOsc.frequency.setValueAtTime(bassFreq, now);
       
-      noteIdx = (noteIdx + 1) % notes.length;
-      this.bgmInterval = window.setTimeout(playNextNote, 250);
+      bassGain.gain.setValueAtTime(0.04, now);
+      bassGain.gain.exponentialRampToValueAtTime(0.001, now + stepDuration * 0.9);
+      
+      bassOsc.connect(bassGain);
+      bassGain.connect(this.ctx.destination);
+      bassOsc.start(now);
+      bassOsc.stop(now + stepDuration);
+      
+      // Play Melody (every other step for 8th notes)
+      if (step % 2 === 0) {
+        const melodyFreq = melodyNotes[(step / 2) % melodyNotes.length];
+        if (melodyFreq > 0) {
+          const melodyOsc = this.ctx.createOscillator();
+          const melodyGain = this.ctx.createGain();
+          melodyOsc.type = 'square';
+          melodyOsc.frequency.setValueAtTime(melodyFreq, now);
+          
+          melodyGain.gain.setValueAtTime(0.02, now);
+          melodyGain.gain.exponentialRampToValueAtTime(0.001, now + stepDuration * 1.8);
+          
+          melodyOsc.connect(melodyGain);
+          melodyGain.connect(this.ctx.destination);
+          melodyOsc.start(now);
+          melodyOsc.stop(now + stepDuration * 2);
+        }
+      }
+      
+      // Play Drum (Kick on beats, Hi-hat on off-beats)
+      if (step % 4 === 0) {
+        // Kick
+        const kickOsc = this.ctx.createOscillator();
+        const kickGain = this.ctx.createGain();
+        kickOsc.type = 'sine';
+        kickOsc.frequency.setValueAtTime(150, now);
+        kickOsc.frequency.exponentialRampToValueAtTime(0.01, now + 0.1);
+        kickGain.gain.setValueAtTime(0.1, now);
+        kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        kickOsc.connect(kickGain);
+        kickGain.connect(this.ctx.destination);
+        kickOsc.start(now);
+        kickOsc.stop(now + 0.1);
+      } else if (step % 2 === 0) {
+        // Hi-hat (noise)
+        const bufferSize = this.ctx.sampleRate * 0.05;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const noiseFilter = this.ctx.createBiquadFilter();
+        noiseFilter.type = 'highpass';
+        noiseFilter.frequency.value = 7000;
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.02, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        noise.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+      
+      step++;
+      this.bgmInterval = window.setTimeout(playStep, stepDuration * 1000);
     };
     
-    playNextNote();
+    playStep();
   }
 
   stopBGM() {
