@@ -316,6 +316,7 @@ export default function App() {
   const scoreRef = useRef(0);
   const livesRef = useRef(3);
   const stageRef = useRef(1);
+  const gameStateRef = useRef<GameState>('START');
   const killsInStageRef = useRef(0);
   
   const playerRef = useRef<Player>({ 
@@ -335,6 +336,11 @@ export default function App() {
   const requestRef = useRef<number>(null);
 
   // Sync refs to state for UI rendering
+  const updateGameState = (newState: GameState) => {
+    setGameState(newState);
+    gameStateRef.current = newState;
+  };
+
   const syncState = () => {
     setScore(scoreRef.current);
     setLives(livesRef.current);
@@ -436,7 +442,7 @@ export default function App() {
     killsInStageRef.current = 0;
     syncState();
     
-    setGameState('PLAYING');
+    updateGameState('PLAYING');
     playerRef.current = { 
       x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, 
       y: CANVAS_HEIGHT - 60,
@@ -453,7 +459,7 @@ export default function App() {
   const startNextStage = () => {
     killsInStageRef.current = 0;
     syncState();
-    setGameState('PLAYING');
+    updateGameState('PLAYING');
     playerBulletsRef.current = [];
     enemyBulletsRef.current = [];
     powerUpsRef.current = [];
@@ -461,7 +467,7 @@ export default function App() {
   };
 
   const gameOver = () => {
-    setGameState('GAMEOVER');
+    updateGameState('GAMEOVER');
     sound.stopBGM();
     if (scoreRef.current > highScore) {
       setHighScore(scoreRef.current);
@@ -993,8 +999,8 @@ export default function App() {
     // 10. Filter out dead enemies and check for stage clear
     enemiesRef.current = enemiesRef.current.filter(e => e.active);
     
-    if (enemiesRef.current.length === 0 && gameState === 'PLAYING') {
-      setGameState('STAGE_CLEAR');
+    if (enemiesRef.current.length === 0 && gameStateRef.current === 'PLAYING') {
+      updateGameState('STAGE_CLEAR');
       stageRef.current += 1;
       sound.playStageClear();
       syncState();
