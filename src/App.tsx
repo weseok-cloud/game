@@ -27,7 +27,7 @@ const KILLS_PER_STAGE = 10;
 
 // --- Types ---
 type GameState = 'START' | 'PLAYING' | 'GAMEOVER' | 'STAGE_CLEAR';
-type EnemyType = 'BASIC' | 'WAVE' | 'DIVER' | 'BOSS';
+type EnemyType = 'BASIC' | 'WAVE' | 'DIVER' | 'BOSS' | 'VENOM' | 'RAIDER' | 'DRONE' | 'WASPER' | 'MICRO';
 type DiverState = 'NORMAL' | 'DIVING' | 'RETURNING';
 type BossState = 'ENTERING' | 'IDLE' | 'SPREAD' | 'CIRCLE';
 
@@ -286,6 +286,7 @@ interface Bullet extends Entity {
   active: boolean;
   vx?: number;
   vy?: number;
+  radius?: number;
 }
 
 interface FloatingText {
@@ -369,7 +370,7 @@ export default function App() {
       };
     }
 
-    const types: EnemyType[] = ['BASIC', 'WAVE', 'DIVER'];
+    const types: EnemyType[] = ['BASIC', 'WAVE', 'DIVER', 'VENOM', 'RAIDER', 'DRONE', 'WASPER', 'MICRO'];
     const type = types[Math.floor(Math.random() * types.length)];
     const x = Math.random() * (CANVAS_WIDTH - ENEMY_RADIUS * 2) + ENEMY_RADIUS;
     const y = yOffset || Math.random() * (CANVAS_HEIGHT / 2);
@@ -379,8 +380,17 @@ export default function App() {
     let typeSpeedMult = 1;
     if (type === 'WAVE') typeSpeedMult = 1.5;
     if (type === 'DIVER') typeSpeedMult = 2.0;
+    if (type === 'VENOM') typeSpeedMult = 0.8;
+    if (type === 'RAIDER') typeSpeedMult = 1.2;
+    if (type === 'DRONE') typeSpeedMult = 1.8;
+    if (type === 'WASPER') typeSpeedMult = 2.0;
+    if (type === 'MICRO') typeSpeedMult = 1.5;
 
     const finalSpeedMult = stageSpeedMult * typeSpeedMult;
+    
+    let hp = 1;
+    if (type === 'VENOM' || type === 'RAIDER') hp = 3;
+    if (type === 'DRONE') hp = 2;
 
     return {
       x,
@@ -396,8 +406,8 @@ export default function App() {
       diveTargetX: 0,
       diveTargetY: 0,
       lastDiveTime: Date.now() + Math.random() * 5000,
-      hp: 1,
-      maxHp: 1,
+      hp,
+      maxHp: hp,
       active: true
     };
   };
@@ -597,6 +607,43 @@ export default function App() {
             enemy.y += (dy / Math.abs(dy)) * 4;
           }
         }
+      } else if (enemy.type === 'VENOM') {
+        enemy.x += enemy.vx * 0.5;
+        enemy.y += enemy.vy * 0.2;
+        if (enemy.x < ENEMY_RADIUS || enemy.x > CANVAS_WIDTH - ENEMY_RADIUS) enemy.vx *= -1;
+        if (enemy.y < ENEMY_RADIUS || enemy.y > CANVAS_HEIGHT / 3) enemy.vy *= -1;
+      } else if (enemy.type === 'RAIDER') {
+        enemy.y += Math.max(0.5, enemy.vy * 0.5);
+        if (enemy.y > CANVAS_HEIGHT + ENEMY_RADIUS) {
+          enemy.y = -ENEMY_RADIUS;
+          enemy.x = Math.random() * (CANVAS_WIDTH - ENEMY_RADIUS * 2) + ENEMY_RADIUS;
+        }
+      } else if (enemy.type === 'DRONE') {
+        enemy.phase += 0.1;
+        enemy.y += Math.abs(enemy.vy) * 0.8;
+        enemy.x += Math.sin(enemy.phase) * 3;
+        if (enemy.x < ENEMY_RADIUS || enemy.x > CANVAS_WIDTH - ENEMY_RADIUS) enemy.phase += Math.PI;
+        if (enemy.y > CANVAS_HEIGHT + ENEMY_RADIUS) {
+          enemy.y = -ENEMY_RADIUS;
+          enemy.x = Math.random() * (CANVAS_WIDTH - ENEMY_RADIUS * 2) + ENEMY_RADIUS;
+        }
+      } else if (enemy.type === 'WASPER') {
+        enemy.phase += 0.15;
+        enemy.y += Math.abs(enemy.vy) * 1.2;
+        enemy.x = enemy.originalX + Math.sin(enemy.phase) * 80;
+        if (enemy.y > CANVAS_HEIGHT + ENEMY_RADIUS) {
+          enemy.y = -ENEMY_RADIUS;
+          enemy.x = Math.random() * (CANVAS_WIDTH - ENEMY_RADIUS * 2) + ENEMY_RADIUS;
+          enemy.originalX = enemy.x;
+        }
+      } else if (enemy.type === 'MICRO') {
+        enemy.y += Math.abs(enemy.vy) * 0.8;
+        enemy.x += enemy.vx * 1.2;
+        if (enemy.x < ENEMY_RADIUS || enemy.x > CANVAS_WIDTH - ENEMY_RADIUS) enemy.vx *= -1;
+        if (enemy.y > CANVAS_HEIGHT + ENEMY_RADIUS) {
+          enemy.y = -ENEMY_RADIUS;
+          enemy.x = Math.random() * (CANVAS_WIDTH - ENEMY_RADIUS * 2) + ENEMY_RADIUS;
+        }
       } else if (enemy.type === 'BOSS') {
         const now = Date.now();
         if (enemy.bossState === 'ENTERING') {
@@ -653,11 +700,86 @@ export default function App() {
       if (enemy.type !== 'BOSS') {
         const now = Date.now();
         if (now - enemy.lastShot > enemy.shootInterval) {
-          enemyBulletsRef.current.push({
-            x: enemy.x,
-            y: enemy.y + ENEMY_RADIUS,
-            active: true
-          });
+          if (enemy.type === 'VENOM') {
+            for (let i = -1; i <= 1; i++) {
+              enemyBulletsRef.current.push({
+                x: enemy.x,
+                y: enemy.y + ENEMY_RADIUS,
+                vx: i * 2,
+                vy: ENEMY_BULLET_SPEED_BASE + (stageRef.current * 0.2),
+                active: true
+              });
+            }
+          } else if (enemy.type === 'RAIDER') {
+            enemyBulletsRef.current.push({
+              x: enemy.x - 10,
+              y: enemy.y + ENEMY_RADIUS,
+              vx: 0,
+              vy: ENEMY_BULLET_SPEED_BASE + (stageRef.current * 0.2),
+              active: true
+            });
+            enemyBulletsRef.current.push({
+              x: enemy.x + 10,
+              y: enemy.y + ENEMY_RADIUS,
+              vx: 0,
+              vy: ENEMY_BULLET_SPEED_BASE + (stageRef.current * 0.2),
+              active: true
+            });
+            enemyBulletsRef.current.push({
+              x: enemy.x,
+              y: enemy.y + ENEMY_RADIUS,
+              vx: 0,
+              vy: (ENEMY_BULLET_SPEED_BASE + (stageRef.current * 0.2)) * 0.6,
+              active: true,
+              radius: 6
+            });
+          } else if (enemy.type === 'DRONE') {
+            for (let i = 0; i < 3; i++) {
+              enemyBulletsRef.current.push({
+                x: enemy.x + (Math.random() - 0.5) * 20,
+                y: enemy.y + ENEMY_RADIUS + (Math.random() * 10),
+                vx: (Math.random() - 0.5) * 3,
+                vy: ENEMY_BULLET_SPEED_BASE + (stageRef.current * 0.2) + Math.random() * 2,
+                active: true
+              });
+            }
+          } else if (enemy.type === 'WASPER') {
+            const speed = ENEMY_BULLET_SPEED_BASE + (stageRef.current * 0.2);
+            enemyBulletsRef.current.push({
+              x: enemy.x - 5,
+              y: enemy.y + ENEMY_RADIUS,
+              vx: -1.5,
+              vy: speed,
+              active: true,
+              radius: 3
+            });
+            enemyBulletsRef.current.push({
+              x: enemy.x + 5,
+              y: enemy.y + ENEMY_RADIUS,
+              vx: 1.5,
+              vy: speed,
+              active: true,
+              radius: 3
+            });
+          } else if (enemy.type === 'MICRO') {
+            const speed = ENEMY_BULLET_SPEED_BASE + (stageRef.current * 0.2) - 1;
+            for (let i = -1; i <= 1; i++) {
+              enemyBulletsRef.current.push({
+                x: enemy.x,
+                y: enemy.y + ENEMY_RADIUS,
+                vx: i * 2.5 + (Math.random() - 0.5),
+                vy: speed + Math.random(),
+                active: true,
+                radius: 2
+              });
+            }
+          } else {
+            enemyBulletsRef.current.push({
+              x: enemy.x,
+              y: enemy.y + ENEMY_RADIUS,
+              active: true
+            });
+          }
           enemy.lastShot = now;
         }
       }
@@ -680,7 +802,7 @@ export default function App() {
       if (!bullet.active) return;
       enemiesRef.current.forEach(enemy => {
         if (!enemy.active) return;
-        const hitRadius = enemy.type === 'BOSS' ? 40 : ENEMY_RADIUS;
+        const hitRadius = (enemy.type === 'BOSS' ? 40 : ENEMY_RADIUS) * 1.5; // Made enemy hitbox 50% larger
         const dx = bullet.x - enemy.x;
         const dy = bullet.y - enemy.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -708,6 +830,11 @@ export default function App() {
             let points = 10;
             if (enemy.type === 'WAVE') points = 20;
             if (enemy.type === 'DIVER') points = 30;
+            if (enemy.type === 'VENOM') points = 40;
+            if (enemy.type === 'RAIDER') points = 50;
+            if (enemy.type === 'DRONE') points = 35;
+            if (enemy.type === 'WASPER') points = 20;
+            if (enemy.type === 'MICRO') points = 15;
             if (enemy.type === 'BOSS') points = 500;
             
             scoreRef.current += points;
@@ -746,11 +873,13 @@ export default function App() {
     // 7. Collision Detection: Enemy Bullets vs Player
     enemyBulletsRef.current.forEach(bullet => {
       if (!bullet.active) return;
+      const paddingX = PLAYER_WIDTH * 0.3; // Reduce player hitbox width by 60%
+      const paddingY = PLAYER_HEIGHT * 0.3; // Reduce player hitbox height by 60%
       if (
-        bullet.x > playerRef.current.x &&
-        bullet.x < playerRef.current.x + PLAYER_WIDTH &&
-        bullet.y > playerRef.current.y &&
-        bullet.y < playerRef.current.y + PLAYER_HEIGHT
+        bullet.x > playerRef.current.x + paddingX &&
+        bullet.x < playerRef.current.x + PLAYER_WIDTH - paddingX &&
+        bullet.y > playerRef.current.y + paddingY &&
+        bullet.y < playerRef.current.y + PLAYER_HEIGHT - paddingY
       ) {
         bullet.active = false;
         if (playerRef.current.shield) {
@@ -771,11 +900,13 @@ export default function App() {
     enemiesRef.current.forEach(enemy => {
       if (!enemy.active) return;
       const hitRadius = enemy.type === 'BOSS' ? 40 : ENEMY_RADIUS;
+      const paddingX = PLAYER_WIDTH * 0.2; // Reduce player collision box
+      const paddingY = PLAYER_HEIGHT * 0.2;
       if (
-        enemy.x + hitRadius > playerRef.current.x &&
-        enemy.x - hitRadius < playerRef.current.x + PLAYER_WIDTH &&
-        enemy.y + hitRadius > playerRef.current.y &&
-        enemy.y - hitRadius < playerRef.current.y + PLAYER_HEIGHT
+        enemy.x + hitRadius > playerRef.current.x + paddingX &&
+        enemy.x - hitRadius < playerRef.current.x + PLAYER_WIDTH - paddingX &&
+        enemy.y + hitRadius > playerRef.current.y + paddingY &&
+        enemy.y - hitRadius < playerRef.current.y + PLAYER_HEIGHT - paddingY
       ) {
         if (playerRef.current.shield) {
           playerRef.current.shield = false;
@@ -999,6 +1130,130 @@ export default function App() {
           ctx.lineTo(3, 0);
           ctx.lineTo(-3, 0);
           ctx.fill();
+        } else if (enemy.type === 'VENOM') {
+          // Venom-Striker (Olive Green Helicopter)
+          ctx.fillStyle = '#3f6212'; // Olive Green Body
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 12, 20, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#1a2e05'; // Dark Green Tail
+          ctx.fillRect(-2, -30, 4, 15);
+          ctx.fillStyle = '#84cc16'; // Cockpit
+          ctx.beginPath();
+          ctx.arc(0, 10, 5, 0, Math.PI * 2);
+          ctx.fill();
+          // Rotor
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.save();
+          ctx.rotate(Date.now() / 50);
+          ctx.fillRect(-25, -2, 50, 4);
+          ctx.fillRect(-2, -25, 4, 50);
+          ctx.restore();
+        } else if (enemy.type === 'RAIDER') {
+          // Raider-Flyer (Brown/Grey Helicopter)
+          ctx.fillStyle = '#78716c'; // Grey-Brown Body
+          ctx.beginPath();
+          ctx.moveTo(0, 20);
+          ctx.lineTo(15, -10);
+          ctx.lineTo(5, -20);
+          ctx.lineTo(-5, -20);
+          ctx.lineTo(-15, -10);
+          ctx.fill();
+          ctx.fillStyle = '#44403c'; // Darker parts
+          ctx.fillRect(-12, 0, 6, 15);
+          ctx.fillRect(6, 0, 6, 15);
+          ctx.fillStyle = '#fde047'; // Cockpit
+          ctx.beginPath();
+          ctx.moveTo(0, 15);
+          ctx.lineTo(8, -5);
+          ctx.lineTo(-8, -5);
+          ctx.fill();
+          // Rotor
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.save();
+          ctx.rotate(-Date.now() / 40);
+          ctx.fillRect(-30, -1.5, 60, 3);
+          ctx.fillRect(-1.5, -30, 3, 60);
+          ctx.restore();
+        } else if (enemy.type === 'DRONE') {
+          // Scout-Drone (Dark Blue/Grey Quadcopter)
+          ctx.fillStyle = '#1e3a8a'; // Dark Blue Center
+          ctx.beginPath();
+          ctx.arc(0, 0, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#94a3b8'; // Grey Arms
+          ctx.fillRect(-15, -2, 30, 4);
+          ctx.fillRect(-2, -15, 4, 30);
+          // Rotors
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+          const drawRotor = (x: number, y: number) => {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(Date.now() / 30);
+            ctx.beginPath();
+            ctx.arc(0, 0, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          };
+          drawRotor(-15, 0);
+          drawRotor(15, 0);
+          drawRotor(0, -15);
+          drawRotor(0, 15);
+          ctx.fillStyle = '#38bdf8'; // Light Blue Eye
+          ctx.beginPath();
+          ctx.arc(0, 0, 4, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (enemy.type === 'WASPER') {
+          // Mini-Wasper (Small Red Helicopter)
+          ctx.scale(0.6, 0.6);
+          ctx.fillStyle = '#ef4444'; // Red Body
+          ctx.beginPath();
+          ctx.moveTo(0, 15);
+          ctx.lineTo(10, -5);
+          ctx.lineTo(-10, -5);
+          ctx.fill();
+          ctx.fillStyle = '#991b1b'; // Dark Red Tail
+          ctx.fillRect(-2, -20, 4, 15);
+          ctx.fillStyle = '#fde047'; // Cockpit
+          ctx.beginPath();
+          ctx.arc(0, 5, 4, 0, Math.PI * 2);
+          ctx.fill();
+          // Rotor
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.save();
+          ctx.rotate(-Date.now() / 25);
+          ctx.fillRect(-18, -1.5, 36, 3);
+          ctx.fillRect(-1.5, -18, 3, 36);
+          ctx.restore();
+        } else if (enemy.type === 'MICRO') {
+          // Micro-Drone (Small Blue Quadcopter)
+          ctx.scale(0.5, 0.5);
+          ctx.fillStyle = '#3b82f6'; // Blue Center
+          ctx.beginPath();
+          ctx.arc(0, 0, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#cbd5e1'; // Light Grey Arms
+          ctx.fillRect(-12, -1.5, 24, 3);
+          ctx.fillRect(-1.5, -12, 3, 24);
+          // Rotors
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+          const drawRotor = (x: number, y: number) => {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(Date.now() / 20);
+            ctx.beginPath();
+            ctx.arc(0, 0, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          };
+          drawRotor(-12, 0);
+          drawRotor(12, 0);
+          drawRotor(0, -12);
+          drawRotor(0, 12);
+          ctx.fillStyle = '#facc15'; // Yellow Eye
+          ctx.beginPath();
+          ctx.arc(0, 0, 3, 0, Math.PI * 2);
+          ctx.fill();
         } else if (enemy.type === 'BOSS') {
           // Draw Boss: GIGA-MECHANICUS
           const scale = 1.5;
@@ -1104,7 +1359,7 @@ export default function App() {
       ctx.fillStyle = '#f87171';
       enemyBulletsRef.current.forEach(bullet => {
         ctx.beginPath();
-        ctx.arc(bullet.x, bullet.y, ENEMY_BULLET_RADIUS, 0, Math.PI * 2);
+        ctx.arc(bullet.x, bullet.y, bullet.radius || ENEMY_BULLET_RADIUS, 0, Math.PI * 2);
         ctx.fill();
       });
       
