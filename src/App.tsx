@@ -389,14 +389,12 @@ export default function App() {
     if (type === 'VENOM') typeSpeedMult = 0.8;
     if (type === 'RAIDER') typeSpeedMult = 1.2;
     if (type === 'DRONE') typeSpeedMult = 1.8;
-    if (type === 'WASPER') typeSpeedMult = 2.0;
-    if (type === 'MICRO') typeSpeedMult = 1.5;
+    if (type === 'WASPER') typeSpeedMult = 1.6;
+    if (type === 'MICRO') typeSpeedMult = 1.3;
 
     const finalSpeedMult = stageSpeedMult * typeSpeedMult;
     
-    let hp = 1;
-    if (type === 'VENOM' || type === 'RAIDER') hp = 3;
-    if (type === 'DRONE') hp = 2;
+    const hp = 1;
 
     return {
       x,
@@ -808,9 +806,15 @@ export default function App() {
       if (!bullet.active) return;
       enemiesRef.current.forEach(enemy => {
         if (!enemy.active) return;
-        const hitRadius = (enemy.type === 'BOSS' ? 40 : ENEMY_RADIUS) * 1.5; // Made enemy hitbox 50% larger
-        const dx = bullet.x - enemy.x;
-        const dy = bullet.y - enemy.y;
+        let hitRadius = ENEMY_RADIUS * 1.5;
+        if (enemy.type === 'BOSS') hitRadius = 80;
+        if (enemy.type === 'WASPER' || enemy.type === 'MICRO') {
+          hitRadius = ENEMY_RADIUS * 2.5; // Even more forgiving for small fast enemies
+        }
+        const bulletCenterX = bullet.x + PLAYER_BULLET_WIDTH / 2;
+        const bulletCenterY = bullet.y + PLAYER_BULLET_HEIGHT / 2;
+        const dx = bulletCenterX - enemy.x;
+        const dy = bulletCenterY - enemy.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         if (distance < hitRadius) {
           bullet.active = false;
@@ -1211,7 +1215,7 @@ export default function App() {
           ctx.fill();
         } else if (enemy.type === 'WASPER') {
           // Mini-Wasper (Small Red Helicopter)
-          ctx.scale(0.6, 0.6);
+          ctx.scale(0.8, 0.8);
           ctx.fillStyle = '#ef4444'; // Red Body
           ctx.beginPath();
           ctx.moveTo(0, 15);
@@ -1233,7 +1237,7 @@ export default function App() {
           ctx.restore();
         } else if (enemy.type === 'MICRO') {
           // Micro-Drone (Small Blue Quadcopter)
-          ctx.scale(0.5, 0.5);
+          ctx.scale(0.7, 0.7);
           ctx.fillStyle = '#3b82f6'; // Blue Center
           ctx.beginPath();
           ctx.arc(0, 0, 8, 0, Math.PI * 2);
